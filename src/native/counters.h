@@ -30,6 +30,8 @@
 #ifndef THIRD_PARTY_PY_ATHERIS_SRC_NATIVE_COUNTERS_H_
 #define THIRD_PARTY_PY_ATHERIS_SRC_NATIVE_COUNTERS_H_
 
+#include <cstdint>
+
 namespace atheris {
 
 struct PCTableEntry {
