@@ -23,6 +23,7 @@ from .import_hook import instrument_imports
 from .instrument_bytecode import instrument_all
 from .instrument_bytecode import instrument_func
 from .instrument_bytecode import patch_code
+from .injector import FuzzInjector
 # MyPy cannot find native code.
 from .native import _reserve_counter  # type: ignore[import]
 from .native import _trace_branch  # type: ignore[import]

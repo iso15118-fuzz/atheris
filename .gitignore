@@ -16,3 +16,6 @@ timeout-*
 crash-*
 *.pyc
 *.so
+
+.cache
+compile_commands.json

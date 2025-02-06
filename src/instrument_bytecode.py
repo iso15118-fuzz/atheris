@@ -27,6 +27,7 @@ import types
 from typing import Any, Callable, Iterator, List, Optional, Tuple, TypeVar, Union
 
 from . import utils
+from .injector import FuzzInjector
 from .native import _reserve_counter  # type: ignore[attr-defined]
 from .version_dependent import add_bytes_to_jump_arg
 from .version_dependent import args_terminator
@@ -1139,6 +1140,7 @@ def patch_code(code: types.CodeType,
     nested: If False, reserve counters, and patch modules. Recursive calls to
       this function are considered nested.
   """
+  code = FuzzInjector().inject(code)
   inst = Instrumentor(code)
 
   # If this code object has already been instrumented, skip it
