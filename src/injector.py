@@ -23,11 +23,11 @@ class FuzzInjector:
   def __init__(self, base_dir: Path = Path(os.getcwd())):
     self.base_path = base_dir
     self.var_idx = 0
-    self.fuzz_mutation_list = []
-    self.fuzz_mutation_map = {}
+    self.mutation_list = []
+    self.mutation_map = {}
     # set attr of builtins to let it globally accessible
-    builtins.fuzz_mutation_list = self.fuzz_mutation_list
-    builtins.fuzz_mutation_map = self.fuzz_mutation_map
+    builtins.fuzz_mutation_list = self.mutation_list
+    builtins.fuzz_mutation_map = self.mutation_map
     builtins.fuzz_mutate_var = self.mutate_var
 
   def mutate_var(self, var, idx):
@@ -71,8 +71,8 @@ class FuzzInjector:
           Instr("STORE_FAST", instr.arg),
           Instr("LOAD_FAST", instr.arg),
         ]
-      self.fuzz_mutation_list.append(0) # TODO: other initialization
-      self.fuzz_mutation_map[self.var_idx] = (
+      self.mutation_list.append(0) # TODO: other initialization
+      self.mutation_map[self.var_idx] = (
         instr.name,
         instr.arg,
         f"{code.co_filename}:"
@@ -106,6 +106,6 @@ class FuzzInjector:
     return code
 
   def dump(self):
-    sys.stderr.write(f"dumping injector data len: {len(self.fuzz_mutation_list)}")
-    for k, v in self.fuzz_mutation_map.items():
-      sys.stderr.write(f"{k}: data: {self.fuzz_mutation_list[k]} tuple: {v}")
+    sys.stderr.write(f"INFO: dumping injector data len: {len(self.mutation_list)}\n")
+    for k, v in self.mutation_map.items():
+      sys.stderr.write(f"INFO: mutation_list[{k}] = {self.mutation_list[k]}, tuple: {v}\n")
