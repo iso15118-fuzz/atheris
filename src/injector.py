@@ -53,10 +53,10 @@ class FuzzInjector:
       elif instr.name == "LOAD_FAST" and instr.arg in modified:
         return [instr]
       sys.stderr.write(
-        f"Fuzz Injector Instrumenting "
+        f"INFO: Injecting bytecode at "
         f"{code.co_filename}:"
         f"{instr.location.end_lineno}:"
-        f"{instr.location.end_col_offset}"
+        f"{instr.location.end_col_offset} "
         f"{instr.name} {instr.arg!r}\n"
       )
       instrs = [
