@@ -52,12 +52,12 @@ class FuzzInjector:
           return [instr]
       elif instr.name == "LOAD_FAST" and instr.arg in modified:
         return [instr]
-      print(
+      sys.stderr.write(
         f"Fuzz Injector Instrumenting "
         f"{code.co_filename}:"
         f"{instr.location.end_lineno}:"
-        f"{instr.location.end_col_offset}",
-        f"{instr.name} {instr.arg!r}"
+        f"{instr.location.end_col_offset}"
+        f"{instr.name} {instr.arg!r}\n"
       )
       instrs = [
         Instr("LOAD_GLOBAL", (True, "fuzz_mutate_var")),
