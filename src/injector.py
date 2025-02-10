@@ -1,4 +1,5 @@
 import builtins
+from collections import Counter
 import os
 import sys
 import types
@@ -25,17 +26,19 @@ class FuzzInjector:
     self.var_idx = 0
     self.mutation_list = []
     self.mutation_map = {}
+    self.instr_counter = Counter()
     # set attr of builtins to let it globally accessible
     builtins.fuzz_mutation_list = self.mutation_list
     builtins.fuzz_mutation_map = self.mutation_map
     builtins.fuzz_mutate_var = self.mutate_var
 
   def mutate_var(self, var, idx):
-    if isinstance(var, (int, bool)):
-      # var = var ^ self.fuzz_mutation_list[idx] # TODO: mutate here
-      var = var
-    # elif isinstance(var, str): # TODO: mutate here
-    #   var = var + str(self.fuzz_mutation_list[idx])
+    if type(var) is int:
+      var = var ^ self.mutation_list[idx] # TODO: mutate here
+    elif type(var) is bool:
+      var = var ^ (self.mutation_list[idx] % 2)
+    # elif isinstance(var, str):
+    #   var = var + str(self.mutation_list[idx])
     return var
 
   def inject(self, code: types.CodeType) -> types.CodeType:
@@ -46,7 +49,7 @@ class FuzzInjector:
 
     def ensure_xor_compatibility(instr: Instr) -> list[Instr]:
       if instr.name == "LOAD_CONST":
-        return [instr] # TODO: mutate some of LOAD_CONST
+        # return [instr] # TODO: mutate some of LOAD_CONST
         # print("LOAD_CONST arg with type", instr.arg, type(instr.arg))
         if type(instr.arg) not in (int, bool):  # TODO: support str
           return [instr]
@@ -87,6 +90,8 @@ class FuzzInjector:
     def process_instruction(instr, modified):
       if not isinstance(instr, Instr):
         return [instr]
+      if instr.name.startswith("LOAD"):
+        self.instr_counter[instr.name] += 1
       if not instr.name.startswith(("LOAD", "STORE")):
         return [instr]
       if instr.name not in ["LOAD_FAST", "LOAD_CONST"]:
@@ -109,3 +114,4 @@ class FuzzInjector:
     sys.stderr.write(f"INFO: dumping injector data len: {len(self.mutation_list)}\n")
     for k, v in self.mutation_map.items():
       sys.stderr.write(f"INFO: mutation_list[{k}] = {self.mutation_list[k]}, tuple: {v}\n")
+    sys.stderr.write(f"Instructions Counter: {self.instr_counter}\n")
