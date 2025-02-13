@@ -4,8 +4,20 @@ import os
 import sys
 import types
 from pathlib import Path
-
+from dataclasses import dataclass
 from bytecode import Bytecode, Instr
+
+@dataclass
+class Position:
+  file: str
+  line: int
+  column: int
+
+  def __str__(self):
+      return f"{self.file}:{self.line}:{self.column}"
+
+  def __repr__(self):
+      return f"{self.file}:{self.line}:{self.column}"
 
 
 def singleton(cls):
@@ -22,7 +34,8 @@ def singleton(cls):
 @singleton
 class FuzzInjector:
   def __init__(self, base_dir: Path = Path(os.getcwd())):
-    self.base_path = base_dir
+    self.disabled = False
+    self.base_dir = base_dir
     self.var_idx = 0
     self.mutation_list = []
     self.mutation_map = {}
@@ -41,15 +54,23 @@ class FuzzInjector:
     #   var = var + str(self.mutation_list[idx])
     return var
 
+  def disable(self):
+    self.disabled = True
+
+  def enable(self):
+    self.disabled = False
+
   def inject(self, code: types.CodeType) -> types.CodeType:
-    if self.base_path not in Path(code.co_filename).parents:
+    if self.disabled:
+      return code
+    if self.base_dir not in Path(code.co_filename).parents:
       return code
     byte_code = Bytecode.from_code(code)
     modified = set(["self"])  # skip self by default
 
     def ensure_xor_compatibility(instr: Instr) -> list[Instr]:
       if instr.name == "LOAD_CONST":
-        # return [instr] # TODO: mutate some of LOAD_CONST
+        return [instr] # TODO: mutate some of LOAD_CONST
         # print("LOAD_CONST arg with type", instr.arg, type(instr.arg))
         if type(instr.arg) not in (int, bool):  # TODO: support str
           return [instr]
@@ -78,9 +99,11 @@ class FuzzInjector:
       self.mutation_map[self.var_idx] = (
         instr.name,
         instr.arg,
-        f"{code.co_filename}:"
-        f"{instr.location.end_lineno}:"
-        f"{instr.location.end_col_offset}",
+        Position(
+          code.co_filename,
+          instr.location.end_lineno,
+          instr.location.end_col_offset,
+        ),
       )
       self.var_idx += 1
       return instrs
