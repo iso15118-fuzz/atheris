@@ -44,30 +44,6 @@ def singleton(cls):
   return get_instance
 
 
-import ast
-
-
-class LoggerCallVisitor(ast.NodeVisitor):
-  def __init__(self, target_line, target_col):
-    self.target_line = target_line
-    self.target_col = target_col
-    self.is_logger_call = False
-
-  def visit_Call(self, node):
-    if (
-      node.lineno == self.target_line
-      and node.col_offset <= self.target_col <= node.end_col_offset
-    ):
-      if isinstance(node.func, ast.Attribute):
-        attr = node.func.attr
-        if (
-          isinstance(node.func.value, ast.Name)
-          and node.func.value.id == "logger"
-        ):
-          self.is_logger_call = True
-    self.generic_visit(node)
-
-
 def is_inside_logger_call(position: Position) -> bool:
   with open(position.file, "r", encoding="utf-8") as f:
     code = f.read()
