@@ -82,7 +82,7 @@ def get_types(position: Position) -> list[str]:
   script = jedi.Script(code=code, path=position.file)
   try:
     inferences = script.infer(position.line, position.column)
-    return [inference.description for inference in inferences]
+    return [inference.description.removeprefix("instance ").removeprefix("class ") for inference in inferences]
   except Exception as e:
     pass
   return []
@@ -115,6 +115,10 @@ class FuzzInjector:
         Position.from_str("iso15118/evcc/comm_session_handler.py:191:21"),
         Position.from_str("iso15118/evcc/comm_session_handler.py:192:20"),
         Position.from_str("iso15118/shared_evcc/comm_session.py:490:29"),
+        Position.from_str("iso15118/shared_evcc/notifications.py:72:36"),
+        Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:506:30"),
+        Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:514:30"),
+        Position.from_str("iso15118/shared_evcc/exi_codec.py:123:72"),
       ]
     )
     self.skip_files = set(
@@ -122,7 +126,7 @@ class FuzzInjector:
         os.path.join(base_dir, "iso15118/evcc/transport/udp_client.py"),
         os.path.join(base_dir, "iso15118/evcc/transport/tcp_client.py"),
         os.path.join(base_dir, "iso15118/evcc/evcc_settings.py"),
-        os.path.join(base_dir, "iso15118/shared_evcc/notifications.py"),
+        os.path.join(base_dir, "iso15118/shared_evcc/logging/__init__.py"),
       ]
     )
     self.mutation_list: list[int] = []
@@ -134,6 +138,12 @@ class FuzzInjector:
     builtins.fuzz_mutate_var = self.mutate_var
 
   def mutate_var(self, var, idx):
+    def get_real_type(var):
+      if hasattr(var, '_value_'):
+          return type(var.value).__name__
+      return type(var).__name__
+    if get_real_type(var) not in self.mutation_map[idx][-1]:
+      print(f"Checking var with type {get_real_type(var)} {self.mutation_map[idx]}")
     res_var = var
     if type(var) is int or type(var) is bool:
       if type(var) is int:
@@ -175,10 +185,10 @@ class FuzzInjector:
       if is_inside_logger_call(position):
         return [instr]
       arg_types = get_types(position)
-      if len(arg_types) != 0 and not any(
-        any(t in s for s in arg_types) for t in ["int", "bool", "bytes"]
-      ):
-        return [instr]
+      # if len(arg_types) != 0 and not any(
+      #   any(t in s for s in arg_types) for t in ["int", "bool", "bytes", "float", "str"]
+      # ):
+      #   return [instr]
       if position in self.skip_positions:
         return [instr]
       if position.file in self.skip_files:
