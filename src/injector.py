@@ -1,12 +1,14 @@
 import builtins
-from collections import Counter
 import os
 import sys
 import types
-from pathlib import Path
+from collections import Counter
 from dataclasses import dataclass
-from bytecode import Bytecode, Instr
+from enum import IntEnum
+from pathlib import Path
+
 import jedi
+from bytecode import Bytecode, Instr
 
 
 @dataclass(frozen=True)
@@ -105,20 +107,22 @@ class FuzzInjector:
         Position.from_str("iso15118/evcc/comm_session_handler.py:504:36"),
         Position.from_str("iso15118/evcc/comm_session_handler.py:536:48"),
         Position.from_str("iso15118/shared_evcc/messages/sdp.py:275:51"),
-        Position.from_str("iso15118/shared_evcc/messages/sdp.py:174:15"),
-        Position.from_str("iso15118/shared_evcc/messages/sdp.py:174:38"),
-        Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:127:27"),
-        Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:136:31"),
-        Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:94:28"),
-        Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:161:23"),
-        Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:148:25"),
-        Position.from_str("iso15118/evcc/comm_session_handler.py:191:21"),
-        Position.from_str("iso15118/evcc/comm_session_handler.py:192:20"),
+        # Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:127:27"),
+        # Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:136:31"),
+        # Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:94:28"),
+        # Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:161:23"),
+        # Position.from_str("iso15118/shared_evcc/messages/v2gtp.py:148:25"),
+        # Position.from_str("iso15118/evcc/comm_session_handler.py:191:21"),
+        # Position.from_str("iso15118/evcc/comm_session_handler.py:192:20"),
         Position.from_str("iso15118/shared_evcc/comm_session.py:490:29"),
-        Position.from_str("iso15118/shared_evcc/notifications.py:72:36"),
-        Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:506:30"),
-        Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:514:30"),
-        Position.from_str("iso15118/shared_evcc/exi_codec.py:123:72"),
+        # Position.from_str("iso15118/shared_evcc/notifications.py:72:36"),
+        # Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:506:30"),
+        # Position.from_str("iso15118/shared_evcc/messages/iso15118_2/body.py:514:30"),
+        # Position.from_str("iso15118/shared_evcc/exi_codec.py:123:72"),
+        Position.from_str("iso15118/shared_evcc/network.py:48:22"),
+        Position.from_str("iso15118/evcc/comm_session_handler.py:420:37"),
+        Position.from_str("iso15118/evcc/comm_session_handler.py:543:66"),
+        Position.from_str("iso15118/evcc/comm_session_handler.py:543:66"),
       ]
     )
     self.skip_files = set(
@@ -132,27 +136,46 @@ class FuzzInjector:
     self.mutation_list: list[int] = []
     self.mutation_map: dict[int, tuple] = {}
     self.instr_counter = Counter()
+    self.mutation_counter = Counter()
     # set attr of builtins to let it globally accessible
     builtins.fuzz_mutation_list = self.mutation_list
     builtins.fuzz_mutation_map = self.mutation_map
     builtins.fuzz_mutate_var = self.mutate_var
 
   def mutate_var(self, var, idx):
-    def get_real_type(var):
-      if hasattr(var, '_value_'):
-          return type(var.value).__name__
+    def get_real_type(var) -> str:
+      if isinstance(var, IntEnum):
+        return type(var.value).__name__
       return type(var).__name__
-    if get_real_type(var) not in self.mutation_map[idx][-1]:
-      print(f"Checking var with type {get_real_type(var)} {self.mutation_map[idx]}")
+
+    real_type = get_real_type(var)
+    # print(f"Checking var: type={type(var)}, real_type={real_type}, expected={self.mutation_map[idx][-1]}")
+
     res_var = var
-    if type(var) is int or type(var) is bool:
-      if type(var) is int:
-        res_var = var ^ self.mutation_list[idx]  # TODO: mutate here
-      elif type(var) is bool:
+    if real_type in ["int", "bool"]:
+      if real_type == "int":
+        if isinstance(var, IntEnum):
+          original_value = var.value
+          new_value = original_value ^ self.mutation_list[idx]
+          enum_cls = type(var)
+          try:
+            res_var = enum_cls(new_value)
+          except ValueError:
+            original_values = list(enum_cls._value2member_map_.keys())
+            if original_values:
+                index = new_value % len(original_values)
+                selected_value = original_values[index]
+                res_var = enum_cls(selected_value)
+            else:
+                res_var = var
+        else:
+          res_var = var ^ self.mutation_list[idx]
+      elif real_type == "bool":
         res_var = bool(var ^ (self.mutation_list[idx] % 2))
       # elif isinstance(var, str):
       #   var = var + str(self.mutation_list[idx])
-      print(f"{var} => {res_var} from {self.mutation_map[idx]}")
+      self.mutation_counter[idx] += 1
+      sys.stderr.write(f"INFO: Mutating {var} => {res_var} from {self.mutation_map[idx]}\n")
     return res_var
 
   def disable(self):
@@ -192,6 +215,8 @@ class FuzzInjector:
       if position in self.skip_positions:
         return [instr]
       if position.file in self.skip_files:
+        return [instr]
+      if instr.arg == "cls" or instr.arg == "self" or instr.arg == "port":
         return [instr]
       sys.stderr.write(
         f"INFO: Injecting bytecode at "
@@ -245,12 +270,17 @@ class FuzzInjector:
     code = byte_code.to_code()
     return code
 
-  def dump(self):
-    sys.stderr.write(
-      f"INFO: dumping injector data len: {len(self.mutation_list)}\n"
-    )
-    for k, v in self.mutation_map.items():
+  def dump(self, dump_mutation_list: bool = True, dump_mutation_map: bool = True, dump_instr_counter: bool = True, dump_mutation_counter: bool = True):
+    if dump_mutation_list:
       sys.stderr.write(
-        f"INFO: mutation_list[{k}] = {self.mutation_list[k]}, tuple: {v}\n"
+        f"DEBUG: dumping injector data len: {len(self.mutation_list)}\n"
       )
-    sys.stderr.write(f"Instructions Counter: {self.instr_counter}\n")
+    if dump_mutation_map:
+      for k, v in self.mutation_map.items():
+        sys.stderr.write(
+          f"DEBUG: mutation_list[{k}] = {self.mutation_list[k]}, tuple: {v}\n"
+        )
+    if dump_instr_counter:
+      sys.stderr.write(f"DEBUG: Instructions Counter: {self.instr_counter}\n")
+    if dump_mutation_counter:
+      sys.stderr.write(f"DEBUG: Mutations Counter: {self.mutation_counter}\n")
