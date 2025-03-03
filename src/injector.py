@@ -9,6 +9,7 @@ from pathlib import Path
 
 import jedi
 from bytecode import Bytecode, Instr
+from pydantic import BaseModel
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,7 @@ class FuzzInjector:
         Position.from_str("iso15118/evcc/comm_session_handler.py:420:37"),
         Position.from_str("iso15118/evcc/comm_session_handler.py:543:66"),
         Position.from_str("iso15118/evcc/comm_session_handler.py:543:66"),
+        Position.from_str("iso15118/evcc/comm_session_handler.py:523:45"),
       ]
     )
     self.skip_files = set(
@@ -137,6 +139,7 @@ class FuzzInjector:
     self.mutation_map: dict[int, tuple] = {}
     self.instr_counter = Counter()
     self.mutation_counter = Counter()
+    self.type_counter = Counter()
     # set attr of builtins to let it globally accessible
     builtins.fuzz_mutation_list = self.mutation_list
     builtins.fuzz_mutation_map = self.mutation_map
@@ -146,9 +149,14 @@ class FuzzInjector:
     def get_real_type(var) -> str:
       if isinstance(var, IntEnum):
         return type(var.value).__name__
+      if isinstance(var, BaseModel):
+        return "pydantic.BaseModel"
+      if isinstance(var, Exception):
+        return "Exception"
       return type(var).__name__
 
     real_type = get_real_type(var)
+    self.type_counter[real_type] += 1
     # print(f"Checking var: type={type(var)}, real_type={real_type}, expected={self.mutation_map[idx][-1]}")
 
     res_var = var
@@ -156,7 +164,9 @@ class FuzzInjector:
       if real_type == "int":
         if isinstance(var, IntEnum):
           original_value = var.value
-          new_value = original_value ^ self.mutation_list[idx]
+          new_value = original_value
+          for _ in range(self.mutation_counter[idx]):
+            new_value ^= self.mutation_list[idx]
           enum_cls = type(var)
           try:
             res_var = enum_cls(new_value)
@@ -169,9 +179,13 @@ class FuzzInjector:
             else:
                 res_var = var
         else:
-          res_var = var ^ self.mutation_list[idx]
+          res_var = var
+          for _ in range(self.mutation_counter[idx]):
+            res_var ^= self.mutation_list[idx]
       elif real_type == "bool":
-        res_var = bool(var ^ (self.mutation_list[idx] % 2))
+        for _ in range(self.mutation_counter[idx]):
+          res_var = var
+          res_var = bool(res_var ^ (self.mutation_list[idx] % 2))
       # elif isinstance(var, str):
       #   var = var + str(self.mutation_list[idx])
       self.mutation_counter[idx] += 1
@@ -193,6 +207,15 @@ class FuzzInjector:
     modified = set(["self"])  # skip self by default
 
     def ensure_xor_compatibility(instr: Instr) -> list[Instr]:
+      position = Position(
+        code.co_filename,
+        instr.location.end_lineno,
+        instr.location.end_col_offset,
+      )
+      if position in self.skip_positions:
+        return [instr]
+      if position.file in self.skip_files:
+        return [instr]
       if instr.name == "LOAD_CONST":
         return [instr]  # TODO: mutate some of LOAD_CONST
         # print("LOAD_CONST arg with type", instr.arg, type(instr.arg))
@@ -200,11 +223,6 @@ class FuzzInjector:
         #   return [instr]
       elif instr.name == "LOAD_FAST" and instr.arg in modified:
         return [instr]
-      position = Position(
-        code.co_filename,
-        instr.location.end_lineno,
-        instr.location.end_col_offset,
-      )
       if is_inside_logger_call(position):
         return [instr]
       arg_types = get_types(position)
@@ -212,10 +230,6 @@ class FuzzInjector:
       #   any(t in s for s in arg_types) for t in ["int", "bool", "bytes", "float", "str"]
       # ):
       #   return [instr]
-      if position in self.skip_positions:
-        return [instr]
-      if position.file in self.skip_files:
-        return [instr]
       if instr.arg == "cls" or instr.arg == "self" or instr.arg == "port":
         return [instr]
       sys.stderr.write(
@@ -223,13 +237,25 @@ class FuzzInjector:
         f"{position} types {arg_types} instr: "
         f"{instr.name} {instr.arg!r}\n"
       )
-      instrs = [
-        Instr("LOAD_GLOBAL", (True, "fuzz_mutate_var")),
-        instr,
-        Instr("LOAD_CONST", self.var_idx),
-        Instr("PRECALL", 2),
-        Instr("CALL", 2),  # Call fuzz_mutate_var(arg, var_idx)
-      ]
+      if instr.name == "LOAD_FAST":
+        instrs = [
+          Instr("LOAD_GLOBAL", (True, "fuzz_mutate_var")),
+          instr,
+          Instr("LOAD_CONST", self.var_idx),
+          Instr("PRECALL", 2),
+          Instr("CALL", 2),  # Call fuzz_mutate_var(arg, var_idx)
+        ]
+      elif instr.name == "COMPARE_OP":
+        fuzz_cmp_res_name = f"fuzz_cmp_res_{self.var_idx}"
+        instrs = [
+          instr,
+          Instr("STORE_FAST", fuzz_cmp_res_name),
+          Instr("LOAD_GLOBAL", (True, "fuzz_mutate_var")),
+          Instr("LOAD_FAST", fuzz_cmp_res_name),
+          Instr("LOAD_CONST", self.var_idx),
+          Instr("PRECALL", 2),
+          Instr("CALL", 2),  # Call fuzz_mutate_var(arg, var_idx)
+        ]
       if instr.name == "LOAD_FAST":
         instrs += [
           Instr("STORE_FAST", instr.arg),
@@ -250,11 +276,11 @@ class FuzzInjector:
     def process_instruction(instr, modified):
       if not isinstance(instr, Instr):
         return [instr]
-      if instr.name.startswith("LOAD"):
+      if any(keyword in instr.name for keyword in ["LOAD", "JUMP", "COMPARE_OP"]):
         self.instr_counter[instr.name] += 1
-      if not instr.name.startswith(("LOAD", "STORE")):
-        return [instr]
-      if instr.name not in ["LOAD_FAST", "LOAD_CONST"]:
+      # if not instr.name.startswith(("LOAD", "STORE")):
+      #   return [instr]
+      if instr.name not in ["LOAD_FAST", "LOAD_CONST", "COMPARE_OP"]:
         return [instr]
       result = ensure_xor_compatibility(instr)
       if instr.name == "LOAD_FAST":
@@ -270,7 +296,7 @@ class FuzzInjector:
     code = byte_code.to_code()
     return code
 
-  def dump(self, dump_mutation_list: bool = True, dump_mutation_map: bool = True, dump_instr_counter: bool = True, dump_mutation_counter: bool = True):
+  def dump(self, dump_mutation_list: bool = True, dump_mutation_map: bool = True, dump_instr_counter: bool = True, dump_mutation_counter: bool = True, dump_type_counter: bool = True):
     if dump_mutation_list:
       sys.stderr.write(
         f"DEBUG: dumping injector data len: {len(self.mutation_list)}\n"
@@ -284,3 +310,5 @@ class FuzzInjector:
       sys.stderr.write(f"DEBUG: Instructions Counter: {self.instr_counter}\n")
     if dump_mutation_counter:
       sys.stderr.write(f"DEBUG: Mutations Counter: {self.mutation_counter}\n")
+    if dump_type_counter:
+      sys.stderr.write(f"DEBUG: Types Counter: {self.type_counter}\n")
