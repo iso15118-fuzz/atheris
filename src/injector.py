@@ -245,7 +245,7 @@ class FuzzInjector:
           Instr("PRECALL", 2),
           Instr("CALL", 2),  # Call fuzz_mutate_var(arg, var_idx)
         ]
-      elif instr.name == "COMPARE_OP":
+      elif instr.name in ["BINARY_OP", "COMPARE_OP", "IS_OP", "CONTAINS_OP"]:
         fuzz_cmp_res_name = f"fuzz_cmp_res_{self.var_idx}"
         instrs = [
           instr,
@@ -276,11 +276,11 @@ class FuzzInjector:
     def process_instruction(instr, modified):
       if not isinstance(instr, Instr):
         return [instr]
-      if any(keyword in instr.name for keyword in ["LOAD", "JUMP", "COMPARE_OP"]):
+      if any(keyword in instr.name for keyword in ["LOAD_", "JUMP_", "_OP"]):
         self.instr_counter[instr.name] += 1
       # if not instr.name.startswith(("LOAD", "STORE")):
       #   return [instr]
-      if instr.name not in ["LOAD_FAST", "LOAD_CONST", "COMPARE_OP"]:
+      if instr.name not in ["LOAD_FAST", "LOAD_CONST", "COMPARE_OP", "IS_OP", "CONTAINS_OP"]:
         return [instr]
       result = ensure_xor_compatibility(instr)
       if instr.name == "LOAD_FAST":
